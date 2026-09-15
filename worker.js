@@ -1,24 +1,19 @@
 // 1. CONFIGURATION
 const M3U_URL = "https://raw.githubusercontent.com/muhammadsahal2002/adfree/refs/heads/master/playlist.m3u";
 
-// 2. AUTO-CATEGORIZE RULES (name contains keyword → category)
-const RULES = [
-  { name: "Sports",         keywords: ["sports", "sport", "unite8", "ten"] },
-  { name: "Movies",         keywords: ["movie", "cinema", "pix", "hbo", "gold", "max", "romedy", "&pictures"] },
-  { name: "Kids",           keywords: ["cartoon", "pogo", "nick", "disney", "sonic", "doraemon", "gopal", "bantul", "chhota"] },
-  { name: "Music",          keywords: ["music", "9xm", "9x jalwa", "9x jhakaas", "9x tashan", "b4u", "zoom", "zing", "sangeet"] },
-  { name: "Documentary",    keywords: ["discovery", "nat geo", "history", "bbc earth", "tlc", "turbo", "travel"] },
-  { name: "Entertainment",  keywords: ["star jalsha", "zee bangla", "colors", "sony", "star plus", "sab", "&tv", "duronto", "deepto", "sun bangla"] },
-  { name: "Religious",      keywords: ["peace", "islam", "quran", "azan", "makkah", "madina"] }
+// 2. HARDCODED CATEGORY NAMES (add/remove as you wish — must match your group-title values)
+const CATEGORIES = [
+  "All Channels",
+  "Entertainment",
+  "Movies",
+  "Sports",
+  "Kids",
+  "Music",
+  "Documentary",
+  "News",
+  "Religious",
+  "Other"
 ];
-
-function guessCategory(name) {
-  const n = name.toLowerCase();
-  for (const r of RULES) {
-    if (r.keywords.some(k => n.includes(k))) return r.name;
-  }
-  return "Other";
-}
 
 // 3. HELPER TO PARSE M3U
 function parseM3U(content) {
@@ -32,11 +27,10 @@ function parseM3U(content) {
       const logoMatch = t.match(/tvg-logo="([^"]*)"/);
       const groupMatch = t.match(/group-title="([^"]*)"/);
       const nameMatch = t.match(/,(.*)$/);
-      const name = nameMatch ? nameMatch[1].trim() : 'Unknown';
       current = {
         logo: logoMatch ? logoMatch[1] : '',
-        name,
-        group: groupMatch ? groupMatch[1].trim() : guessCategory(name)
+        name: nameMatch ? nameMatch[1].trim() : 'Unknown',
+        group: groupMatch ? groupMatch[1].trim() : 'Other'
       };
     } else if (t && !t.startsWith('#')) {
       current.url = t;
@@ -47,30 +41,22 @@ function parseM3U(content) {
   return channels;
 }
 
-// 4. MANIFEST
-function buildManifest(groups) {
-  const catalogs = [
-    { type: "tv", id: "m3u_all", name: "All Channels", extra: [{ name: "search", isRequired: false }] }
-  ];
-  for (const g of groups) {
-    catalogs.push({
-      type: "tv",
-      id: "m3u_group_" + encodeURIComponent(g),
-      name: g,
-      extra: [{ name: "search", isRequired: false }]
-    });
-  }
-  return {
-    id: "org.mym3u.addon",
-    version: "1.0.0",
-    name: "My Custom M3U TV",
-    description: "Live TV grouped by category from GitHub M3U",
-    resources: ["catalog", "meta", "stream"],
-    types: ["tv"],
-    catalogs,
-    idPrefixes: ["m3u:"]
-  };
-}
+// 4. MANIFEST (built from hardcoded CATEGORIES)
+const manifest = {
+  id: "org.mym3u.addon",
+  version: "1.0.0",
+  name: "My Custom M3U TV",
+  description: "Live TV grouped by category",
+  resources: ["catalog", "meta", "stream"],
+  types: ["tv"],
+  catalogs: CATEGORIES.map((cat, i) => ({
+    type: "tv",
+    id: i === 0 ? "m3u_all" : "m3u_group_" + encodeURIComponent(cat),
+    name: cat,
+    extra: [{ name: "search", isRequired: false }]
+  })),
+  idPrefixes: ["m3u:"]
+};
 
 // 5. MAIN WORKER
 export default {
@@ -78,6 +64,7 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // Fetch and parse playlist
     let channels = [];
     try {
       const res = await fetch(M3U_URL);
@@ -87,14 +74,14 @@ export default {
       return new Response("Error loading playlist: " + e.message, { status: 500 });
     }
 
-    const groups = [...new Set(channels.map(c => c.group))];
-
+    // Manifest
     if (path === "/manifest.json") {
-      return new Response(JSON.stringify(buildManifest(groups)), {
+      return new Response(JSON.stringify(manifest), {
         headers: { "Content-Type": "application/json" }
       });
     }
 
+    // Meta handler
     if (path.startsWith("/meta/tv/")) {
       const id = decodeURIComponent(path.split("/meta/tv/")[1].split("/")[0]);
       const idx = parseInt(id.replace("m3u:", ""), 10);
@@ -111,11 +98,12 @@ export default {
       }), { headers: { "Content-Type": "application/json" } });
     }
 
+    // Catalog handler
     if (path.startsWith("/catalog/tv/")) {
       const catId = decodeURIComponent(path.split("/catalog/tv/")[1].split("/")[0]);
       let filtered = channels;
       if (catId !== "m3u_all") {
-        const groupName = catId.replace("m3u_group_", "");
+        const groupName = decodeURIComponent(catId.replace("m3u_group_", ""));
         filtered = channels.filter(ch => ch.group === groupName);
       }
       const search = url.searchParams.get("search");
@@ -132,6 +120,7 @@ export default {
       });
     }
 
+    // Stream handler
     if (path.startsWith("/stream/tv/")) {
       const id = decodeURIComponent(path.split("/stream/tv/")[1].split("/")[0]);
       const idx = parseInt(id.replace("m3u:", ""), 10);
