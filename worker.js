@@ -27,31 +27,20 @@ function parseM3U(content) {
   return channels;
 }
 
-// 3. CACHE (so we don't re-fetch M3U for every request)
-let cache = { data: null, time: 0 };
-const CACHE_TTL = 60 * 1000; // 1 minute
-
+// 3. FETCH CHANNELS
 async function getChannels() {
-  const now = Date.now();
-  if (cache.data && (now - cache.time) < CACHE_TTL) return cache.data;
-  const res = await fetch(M3U_URL);
-  if (!res.ok) throw new Error("Failed to fetch M3U");
-  const channels = parseM3U(await res.text());
-  cache = { data: channels, time: now };
-  return channels;
+  const bustUrl = M3U_URL + '?t=' + Date.now();
+  const res = await fetch(bustUrl, { cache: 'no-store' });
+  if (!res.ok) throw new Error("Failed to fetch M3U: " + res.status);
+  const text = await res.text();
+  return { channels: parseM3U(text), rawLength: text.length };
 }
 
-// 4. BUILD MANIFEST DYNAMICALLY
+// 4. BUILD MANIFEST
 function buildManifest(groups) {
   const catalogs = [
-    {
-      type: "tv",
-      id: "m3u_all",
-      name: "All Channels",
-      extra: [{ name: "search", isRequired: false }]
-    }
+    { type: "tv", id: "m3u_all", name: "All Channels", extra: [{ name: "search", isRequired: false }] }
   ];
-
   for (const g of groups) {
     catalogs.push({
       type: "tv",
@@ -60,10 +49,9 @@ function buildManifest(groups) {
       extra: [{ name: "search", isRequired: false }]
     });
   }
-
   return {
     id: "org.mym3u.addon",
-    version: "1.0.0",
+    version: "1.0.2",
     name: "My Custom M3U TV",
     description: "Live TV grouped by category",
     resources: ["catalog", "meta", "stream"],
@@ -79,21 +67,40 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // Fetch channels
     let channels = [];
+    let rawLength = 0;
+    let fetchError = null;
+
     try {
-      channels = await getChannels();
+      const result = await getChannels();
+      channels = result.channels;
+      rawLength = result.rawLength;
     } catch (e) {
-      return new Response("Error loading playlist: " + e.message, { status: 500 });
+      fetchError = e.message;
     }
 
-    // Get groups (preserving order, excluding "Other" if empty)
     const groups = [...new Set(channels.map(c => c.group))].filter(g => g && g !== "Other");
+
+    // --- DEBUG ENDPOINT ---
+    if (path === "/debug") {
+      return new Response(JSON.stringify({
+        m3uUrl: M3U_URL,
+        fetchError: fetchError,
+        rawLength: rawLength,
+        totalChannels: channels.length,
+        groups: groups,
+        firstChannel: channels[0] || null,
+        sampleKids: channels.find(c => c.group === 'Kids') || null,
+        sampleEntertainment: channels.find(c => c.group === 'Entertainment') || null
+      }, null, 2), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
 
     // --- MANIFEST ---
     if (path === "/manifest.json") {
       return new Response(JSON.stringify(buildManifest(groups)), {
-        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+        headers: { "Content-Type": "application/json" }
       });
     }
 
@@ -133,10 +140,7 @@ export default {
 
       const metas = filtered.map(ch => ({
         id: `m3u:${channels.indexOf(ch)}`,
-        type: "tv",
-        name: ch.name,
-        poster: ch.logo,
-        posterShape: "square"
+        type: "tv", name: ch.name, poster: ch.logo, posterShape: "square"
       }));
 
       return new Response(JSON.stringify({ metas }), {
