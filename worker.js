@@ -1,21 +1,7 @@
 // 1. CONFIGURATION
 const M3U_URL = "https://raw.githubusercontent.com/muhammadsahal2002/adfree/refs/heads/master/playlist.m3u";
 
-// 2. HARDCODED CATEGORY NAMES (add/remove as you wish — must match your group-title values)
-const CATEGORIES = [
-  "All Channels",
-  "Entertainment",
-  "Movies",
-  "Sports",
-  "Kids",
-  "Music",
-  "Documentary",
-  "News",
-  "Religious",
-  "Other"
-];
-
-// 3. HELPER TO PARSE M3U
+// 2. HELPER TO PARSE M3U
 function parseM3U(content) {
   const lines = content.split('\n');
   const channels = [];
@@ -41,22 +27,51 @@ function parseM3U(content) {
   return channels;
 }
 
-// 4. MANIFEST (built from hardcoded CATEGORIES)
-const manifest = {
-  id: "org.mym3u.addon",
-  version: "1.0.0",
-  name: "My Custom M3U TV",
-  description: "Live TV grouped by category",
-  resources: ["catalog", "meta", "stream"],
-  types: ["tv"],
-  catalogs: CATEGORIES.map((cat, i) => ({
-    type: "tv",
-    id: i === 0 ? "m3u_all" : "m3u_group_" + encodeURIComponent(cat),
-    name: cat,
-    extra: [{ name: "search", isRequired: false }]
-  })),
-  idPrefixes: ["m3u:"]
-};
+// 3. CACHE (so we don't re-fetch M3U for every request)
+let cache = { data: null, time: 0 };
+const CACHE_TTL = 60 * 1000; // 1 minute
+
+async function getChannels() {
+  const now = Date.now();
+  if (cache.data && (now - cache.time) < CACHE_TTL) return cache.data;
+  const res = await fetch(M3U_URL);
+  if (!res.ok) throw new Error("Failed to fetch M3U");
+  const channels = parseM3U(await res.text());
+  cache = { data: channels, time: now };
+  return channels;
+}
+
+// 4. BUILD MANIFEST DYNAMICALLY
+function buildManifest(groups) {
+  const catalogs = [
+    {
+      type: "tv",
+      id: "m3u_all",
+      name: "All Channels",
+      extra: [{ name: "search", isRequired: false }]
+    }
+  ];
+
+  for (const g of groups) {
+    catalogs.push({
+      type: "tv",
+      id: "m3u_group_" + encodeURIComponent(g),
+      name: g,
+      extra: [{ name: "search", isRequired: false }]
+    });
+  }
+
+  return {
+    id: "org.mym3u.addon",
+    version: "1.0.0",
+    name: "My Custom M3U TV",
+    description: "Live TV grouped by category",
+    resources: ["catalog", "meta", "stream"],
+    types: ["tv"],
+    catalogs,
+    idPrefixes: ["m3u:"]
+  };
+}
 
 // 5. MAIN WORKER
 export default {
@@ -64,24 +79,25 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // Fetch and parse playlist
+    // Fetch channels
     let channels = [];
     try {
-      const res = await fetch(M3U_URL);
-      if (!res.ok) throw new Error("Failed to fetch M3U");
-      channels = parseM3U(await res.text());
+      channels = await getChannels();
     } catch (e) {
       return new Response("Error loading playlist: " + e.message, { status: 500 });
     }
 
-    // Manifest
+    // Get groups (preserving order, excluding "Other" if empty)
+    const groups = [...new Set(channels.map(c => c.group))].filter(g => g && g !== "Other");
+
+    // --- MANIFEST ---
     if (path === "/manifest.json") {
-      return new Response(JSON.stringify(manifest), {
-        headers: { "Content-Type": "application/json" }
+      return new Response(JSON.stringify(buildManifest(groups)), {
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
       });
     }
 
-    // Meta handler
+    // --- META ---
     if (path.startsWith("/meta/tv/")) {
       const id = decodeURIComponent(path.split("/meta/tv/")[1].split("/")[0]);
       const idx = parseInt(id.replace("m3u:", ""), 10);
@@ -92,35 +108,43 @@ export default {
       return new Response(JSON.stringify({
         meta: {
           id, type: "tv", name: ch.name,
-          poster: ch.logo, posterShape: "square", background: ch.logo,
+          poster: ch.logo, posterShape: "square",
+          background: ch.logo,
           description: `Live channel: ${ch.name} (${ch.group})`
         }
       }), { headers: { "Content-Type": "application/json" } });
     }
 
-    // Catalog handler
+    // --- CATALOG ---
     if (path.startsWith("/catalog/tv/")) {
       const catId = decodeURIComponent(path.split("/catalog/tv/")[1].split("/")[0]);
       let filtered = channels;
+
       if (catId !== "m3u_all") {
-        const groupName = decodeURIComponent(catId.replace("m3u_group_", ""));
+        const groupName = catId.replace("m3u_group_", "");
         filtered = channels.filter(ch => ch.group === groupName);
       }
+
       const search = url.searchParams.get("search");
       if (search) {
         const q = search.toLowerCase();
         filtered = filtered.filter(ch => ch.name.toLowerCase().includes(q));
       }
+
       const metas = filtered.map(ch => ({
         id: `m3u:${channels.indexOf(ch)}`,
-        type: "tv", name: ch.name, poster: ch.logo, posterShape: "square"
+        type: "tv",
+        name: ch.name,
+        poster: ch.logo,
+        posterShape: "square"
       }));
+
       return new Response(JSON.stringify({ metas }), {
         headers: { "Content-Type": "application/json" }
       });
     }
 
-    // Stream handler
+    // --- STREAM ---
     if (path.startsWith("/stream/tv/")) {
       const id = decodeURIComponent(path.split("/stream/tv/")[1].split("/")[0]);
       const idx = parseInt(id.replace("m3u:", ""), 10);
