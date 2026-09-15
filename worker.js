@@ -1,7 +1,7 @@
 // 1. CONFIGURATION
 const M3U_URL = "https://raw.githubusercontent.com/muhammadsahal2002/adfree/refs/heads/master/playlist.m3u";
 
-// 2. HELPER TO PARSE M3U
+// 2. PARSE M3U
 function parseM3U(content) {
   const lines = content.split('\n');
   const channels = [];
@@ -27,13 +27,14 @@ function parseM3U(content) {
   return channels;
 }
 
-// 3. FETCH CHANNELS
+// 3. FETCH + PARSE (no cache)
 async function getChannels() {
   const bustUrl = M3U_URL + '?t=' + Date.now();
   const res = await fetch(bustUrl, { cache: 'no-store' });
-  if (!res.ok) throw new Error("Failed to fetch M3U: " + res.status);
+  if (!res.ok) throw new Error("Fetch failed: " + res.status);
   const text = await res.text();
-  return { channels: parseM3U(text), rawLength: text.length };
+  const channels = parseM3U(text);
+  return { channels, rawLength: text.length };
 }
 
 // 4. BUILD MANIFEST
@@ -51,7 +52,7 @@ function buildManifest(groups) {
   }
   return {
     id: "org.mym3u.addon",
-    version: "1.0.2",
+    version: "1.0.3",
     name: "My Custom M3U TV",
     description: "Live TV grouped by category",
     resources: ["catalog", "meta", "stream"],
