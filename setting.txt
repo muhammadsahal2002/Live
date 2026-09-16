@@ -1,0 +1,18 @@
+Anime skip 4c5o9twLVv6espoYcLRTADUU8h8kW2uA
+
+
+
+Addon
+
+
+
+https://misty-feather-1506.taharimbadhon27.workers.dev/manifest.json
+
+
+https://bharat-binge.semi-column.workers.dev/platform%3Anetflix-movies%2Cplatform%3Anetflix-series%2Cplatform%3Aprime-movies%2Cplatform%3Aprime-series%2Cplatform%3Azee5-overall%2Cplatform%3Ajiohotstar-movies%2Cplatform%3Ajiohotstar-series%2Cplatform%3Asonyliv-movies%2Cplatform%3Asonyliv-series%2Clang%3Abn-recent-movie%2Clang%3Abn-recent-series%2Clang%3Abn-latest_episodes-series%2Clang%3Abn-top_rated-movie%2Clang%3Abn-top_rated-series%2Clang%3Abn-surprise_me-movie%2Clang%3Abn-surprise_me-series/manifest.json
+
+
+Plugin
+
+https://raw.githubusercontent.com/muhammadsahal2002/CS3/refs/heads/Nuvio/manifest.json
+
