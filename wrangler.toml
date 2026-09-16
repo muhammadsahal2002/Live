@@ -1,3 +1,4 @@
 name = "m3u-addon"
-main = "index.js"
-compatibility_date = "2024-01-01"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+format = "modules"
